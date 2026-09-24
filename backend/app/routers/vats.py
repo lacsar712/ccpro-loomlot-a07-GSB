@@ -5,6 +5,10 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user
+from app.confirmation_service import (
+    is_confirmation_valid,
+    load_vat_with_latest_confirmation,
+)
 from app.database import get_db
 from app.models.dye_house import DyeHouse
 from app.models.user import User
@@ -79,6 +83,17 @@ def update_vat(
         house = db.query(DyeHouse).filter(DyeHouse.id == data["dye_house_id"]).first()
         if not house:
             raise HTTPException(status_code=400, detail="染坊不存在")
+    if "status" in data and data["status"] != item.status:
+        if item.status == "drain":
+            raise HTTPException(status_code=409, detail="染缸已排液，状态不可改回")
+        if data["status"] == "drain":
+            # 经编辑进入排液同样受清缸确认单绑死，与排液动作同一查询
+            _, latest = load_vat_with_latest_confirmation(db, vat_id)
+            if not is_confirmation_valid(latest):
+                raise HTTPException(
+                    status_code=409,
+                    detail="尚无合格的清缸确认单（残渣已清、管路已冲且照片至少2张），禁止排液",
+                )
     for k, v in data.items():
         setattr(item, k, v)
     try:
@@ -96,12 +111,20 @@ def drain_vat(
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
 ):
-    """可选：完成排液，将染缸状态置为 drain。"""
-    item = db.query(Vat).filter(Vat.id == vat_id).first()
-    if not item:
+    """排液：仅当该缸最新一张清缸确认单合格时放行。
+
+    放行判断与读最新确认单走同一个查询（load_vat_with_latest_confirmation）。
+    """
+    item, latest = load_vat_with_latest_confirmation(db, vat_id)
+    if item is None:
         raise HTTPException(status_code=404, detail="染缸不存在")
     if item.status == "drain":
         raise HTTPException(status_code=400, detail="染缸已在排液状态")
+    if not is_confirmation_valid(latest):
+        raise HTTPException(
+            status_code=409,
+            detail="尚无合格的清缸确认单（残渣已清、管路已冲均勾“是”且照片至少2张），禁止排液",
+        )
     item.status = "drain"
     db.commit()
     db.refresh(item)

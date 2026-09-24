@@ -5,6 +5,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user
+from app.confirmation_service import is_confirmation_valid, list_vats_with_latest
 from app.database import get_db
 from app.models.dye_house import DyeHouse
 from app.models.dye_lot import DyeLot
@@ -22,10 +23,15 @@ def get_stats(
     _: User = Depends(get_current_user),
 ):
     now = datetime.now(timezone.utc)
+    # 染程中缸逐口 join 其最新清缸确认单：最新单不合格（或无单）即计入待确认。
+    # 与染缸列表「染程中且尚无合格确认」的手数同源对账。
+    dyeing_rows = list_vats_with_latest(db, status="dyeing")
+    unconfirmed = sum(1 for _, latest in dyeing_rows if not is_confirmation_valid(latest))
     return DashboardStats(
         dye_house_total=db.query(func.count(DyeHouse.id)).scalar() or 0,
         vat_ready_count=db.query(func.count(Vat.id)).filter(Vat.status == "ready").scalar() or 0,
         vat_dyeing_count=db.query(func.count(Vat.id)).filter(Vat.status == "dyeing").scalar() or 0,
+        vat_dyeing_unconfirmed_count=unconfirmed,
         lots_last_7d=(
             db.query(func.count(DyeLot.id))
             .filter(DyeLot.started_at >= now - timedelta(days=7))

@@ -48,15 +48,20 @@ docker compose down
 ## 业务实体
 
 1. **DyeHouse** — `name`, `waterNote`, `notes`
-2. **Vat** — `dyeHouseId`, `vatCode`, `fiberType`, `capacityL`, `status` ∈ `ready|dyeing|drain`
+2. **Vat** — `dyeHouseId`, `vatCode`, `fiberType`, `capacityL`, `status` ∈ `ready|dyeing|drain`, `hasValidConfirmation`（是否具备合格清缸确认）
 3. **DyeLot** — `vatId`, `recipeName`, `fabricKg`, `startedAt`, `operatorName`
 4. **FastnessCheck** — `dyeLotId`, `checkedAt`, `washFastness`(1–5), `rubFastness`(>0), `tempC`, `notes`
+5. **TankConfirmation（清缸确认单）** — `vatId`, `residueCleared`（残渣已清）, `pipeFlushed`（管路已冲）, `photoCount`（照片张数）, `confirmedAt`, `confirmer`，输出附 `isValid`
 
 ### 规则
 
-- 仅当染缸状态为 `ready` 或 `dyeing` 时可新建染程，否则 409
+- 仅当染缸状态为 `ready` 或 `dyeing` 时可新建染程，否则 409；从就绪进入染程不看清缸确认单
 - 新建染程后，染缸状态自动设为 `dyeing`
-- 可选接口：`POST /api/vats/{id}/drain` 将染缸置为 `drain`
+- 染缸已排液（`drain`）后禁止再开染程，也禁止把已有染程改挂到该缸，均 409；改染程其他字段不受限
+- 排液前必须先有合格清缸确认单：残渣已清、管路已冲均勾“是”且照片至少 2 张，否则提交确认单 400、排液 409（中文）
+- 同缸可保留多张历史确认单，以最新一张为准；排液放行判断与读最新确认单走同一查询
+- `POST /api/vats/{id}/drain` 将染缸置为 `drain`
+- 看板统计「染程中且尚无合格确认」缸数，与染缸列表同条件手数对账一致
 
 ## 主要 API
 
@@ -66,7 +71,8 @@ docker compose down
 - `GET/POST/PUT/DELETE /api/vats` · `POST /api/vats/{id}/drain`
 - `GET/POST/PUT/DELETE /api/dye-lots`
 - `GET/POST/PUT/DELETE /api/fastness-checks`
-- `GET /api/dashboard/stats`
+- `GET/POST /api/tank-confirmations`（可按 `vatId` 过滤）· `GET /api/tank-confirmations/latest?vatId=`
+- `GET /api/dashboard/stats`（含 `vatDyeingUnconfirmedCount`）
 
 除登录外需 `Authorization: Bearer <token>`。字段对外为 camelCase。
 

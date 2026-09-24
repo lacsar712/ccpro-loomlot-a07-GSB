@@ -1,15 +1,58 @@
 from datetime import datetime, timedelta, timezone
 
+from sqlalchemy import text
+
 from app.auth import hash_password
 from app.database import SessionLocal
 from app.models.dye_house import DyeHouse
 from app.models.dye_lot import DyeLot
 from app.models.fastness_check import FastnessCheck
+from app.models.tank_confirmation import TankConfirmation
 from app.models.user import User
 from app.models.vat import Vat
 
 
+def ensure_schema() -> None:
+    """对已有数据库做幂等的轻量补列（项目未使用 Alembic）。
+
+    create_all 只建新表、不改已存在的 vats 表；老库需补合格确认标记列。
+    """
+    db = SessionLocal()
+    try:
+        if db.bind.dialect.name == "sqlite":
+            cols = {row[1] for row in db.execute(text("PRAGMA table_info(vats)"))}
+            missing = "has_valid_confirmation" not in cols
+            if missing:
+                db.execute(
+                    text(
+                        "ALTER TABLE vats "
+                        "ADD COLUMN has_valid_confirmation BOOLEAN NOT NULL DEFAULT 0"
+                    )
+                )
+        else:
+            exists = db.execute(
+                text(
+                    "SELECT 1 FROM information_schema.columns "
+                    "WHERE table_name='vats' AND column_name='has_valid_confirmation'"
+                )
+            ).first()
+            missing = not exists
+            if missing:
+                db.execute(
+                    text(
+                        "ALTER TABLE vats "
+                        "ADD COLUMN has_valid_confirmation BOOLEAN NOT NULL DEFAULT false"
+                    )
+                )
+        if missing:
+            db.commit()
+            print("Added column vats.has_valid_confirmation.")
+    finally:
+        db.close()
+
+
 def seed() -> None:
+    ensure_schema()
     db = SessionLocal()
     try:
         if db.query(User).count() == 0:
@@ -72,6 +115,8 @@ def seed() -> None:
                 fiber_type="混纺",
                 capacity_l=500.0,
                 status="drain",
+                # 已排液：历史上凭一张合格清缸确认单放行
+                has_valid_confirmation=True,
             )
             db.add_all([v1, v2, v3, v4])
             db.flush()
@@ -114,6 +159,29 @@ def seed() -> None:
                         rub_fastness=4.0,
                         temp_c=37.0,
                         notes=None,
+                    ),
+                ]
+            )
+            # v4 排液前的清缸确认历史：早先一张不合格（照片仅 1 张），
+            # 补做的最新一张合格——同缸保留历史，以最新为准，故 v4 可排液。
+            # v1（染程中）刻意不建确认单：看板“染程中且尚无合格确认”应为 1。
+            db.add_all(
+                [
+                    TankConfirmation(
+                        vat_id=v4.id,
+                        residue_cleared=True,
+                        pipe_flushed=False,
+                        photo_count=1,
+                        confirmed_at=now - timedelta(days=3),
+                        confirmer="染程操作员",
+                    ),
+                    TankConfirmation(
+                        vat_id=v4.id,
+                        residue_cleared=True,
+                        pipe_flushed=True,
+                        photo_count=3,
+                        confirmed_at=now - timedelta(days=3) + timedelta(minutes=20),
+                        confirmer="染坊主管",
                     ),
                 ]
             )
