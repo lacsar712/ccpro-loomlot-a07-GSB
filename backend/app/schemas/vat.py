@@ -34,3 +34,4 @@ class VatOut(BaseModel):
     fiber_type: str = Field(serialization_alias="fiberType")
     capacity_l: float = Field(serialization_alias="capacityL")
     status: VatStatus
+    has_valid_confirm: bool = Field(serialization_alias="hasValidConfirm")

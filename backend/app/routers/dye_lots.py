@@ -37,6 +37,8 @@ def create_dye_lot(
     vat = db.query(Vat).filter(Vat.id == payload.vat_id).first()
     if not vat:
         raise HTTPException(status_code=400, detail="染缸不存在")
+    if vat.status == "drain":
+        raise HTTPException(status_code=409, detail="染缸已排液，禁止再开染程")
     if vat.status not in ALLOWED_VAT_STATUSES:
         raise HTTPException(
             status_code=409,
@@ -83,6 +85,8 @@ def update_dye_lot(
         vat = db.query(Vat).filter(Vat.id == data["vat_id"]).first()
         if not vat:
             raise HTTPException(status_code=400, detail="染缸不存在")
+        if vat.status == "drain":
+            raise HTTPException(status_code=409, detail="目标染缸已排液，禁止把染程改挂到该缸")
         if vat.status not in ALLOWED_VAT_STATUSES:
             raise HTTPException(
                 status_code=409,

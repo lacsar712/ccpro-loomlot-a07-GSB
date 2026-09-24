@@ -26,6 +26,13 @@ def get_stats(
         dye_house_total=db.query(func.count(DyeHouse.id)).scalar() or 0,
         vat_ready_count=db.query(func.count(Vat.id)).filter(Vat.status == "ready").scalar() or 0,
         vat_dyeing_count=db.query(func.count(Vat.id)).filter(Vat.status == "dyeing").scalar() or 0,
+        # 与 /vats 列表「dyeing 且 hasValidConfirm=false」同口径手数对账
+        vat_dyeing_no_confirm_count=(
+            db.query(func.count(Vat.id))
+            .filter(Vat.status == "dyeing", Vat.has_valid_confirm.is_(False))
+            .scalar()
+            or 0
+        ),
         lots_last_7d=(
             db.query(func.count(DyeLot.id))
             .filter(DyeLot.started_at >= now - timedelta(days=7))

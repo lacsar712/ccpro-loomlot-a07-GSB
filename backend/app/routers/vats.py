@@ -10,6 +10,7 @@ from app.models.dye_house import DyeHouse
 from app.models.user import User
 from app.models.vat import Vat
 from app.schemas.vat import VatCreate, VatUpdate, VatOut
+from app.services import get_vat_with_latest_confirm
 
 router = APIRouter(prefix="/api/vats", tags=["vats"])
 
@@ -96,12 +97,22 @@ def drain_vat(
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
 ):
-    """可选：完成排液，将染缸状态置为 drain。"""
-    item = db.query(Vat).filter(Vat.id == vat_id).first()
-    if not item:
+    """排液：与最新一张清缸确认单绑死。
+
+    放行判断与「读最新确认单」走同一查询（get_vat_with_latest_confirm），
+    只用该查询取回的确认单判定，不另行查库。
+    """
+    result = get_vat_with_latest_confirm(db, vat_id)
+    if result is None:
         raise HTTPException(status_code=404, detail="染缸不存在")
+    item, latest_confirm = result
     if item.status == "drain":
         raise HTTPException(status_code=400, detail="染缸已在排液状态")
+    if latest_confirm is None or not latest_confirm.qualified:
+        raise HTTPException(
+            status_code=409,
+            detail="最新清缸确认单不合格或尚未提交（须残渣已清、管路已冲且照片≥2张），禁止排液",
+        )
     item.status = "drain"
     db.commit()
     db.refresh(item)

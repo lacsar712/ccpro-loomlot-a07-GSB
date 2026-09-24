@@ -51,6 +51,8 @@ def seed() -> None:
                 fiber_type="棉",
                 capacity_l=800.0,
                 status="dyeing",
+                # 染程中且尚无合格清缸确认：排液前需先提交合格确认单
+                has_valid_confirm=False,
             )
             v2 = Vat(
                 dye_house_id=h1.id,
